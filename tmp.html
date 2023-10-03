@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            
+        </style>
+    </head>
+    <body class="markdown-body">
+        <h1>Octree</h1>
+<ul>
+<li>Tree-based structure where each node has 8 children (octants)</li>
+<li>Used in computer graphics!</li>
+</ul>
+<h2>Structure</h2>
+<pre><code class="language-rust">struct Octree&lt;T&gt; {
+    data: T,
+    children: [Octree; 8],
+}
+</code></pre>
+<p><img src="Octree.png" alt="" /></p>
+
+    </body>
+</html>

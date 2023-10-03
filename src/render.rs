@@ -7,6 +7,7 @@ use std::{collections::HashMap, path::PathBuf};
 pub fn render_files(
     files: &HashMap<PathBuf, String>,
     template: String,
+    style_sheet: String,
 ) -> HashMap<PathBuf, String> {
     let mut rendered_files: HashMap<PathBuf, String> = HashMap::new();
     let mut hb = Handlebars::new();
@@ -16,7 +17,7 @@ pub fn render_files(
 
     for (path, content) in files {
         let html = markdown_to_html(&content, &ComrakOptions::default());
-        let context = json!({ "content": html });
+        let context = json!({ "content": html,  });
         let context = handlebars::Context::from(context);
 
         rendered_files.insert(
