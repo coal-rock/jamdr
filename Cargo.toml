@@ -13,3 +13,4 @@ glob = "0.3.1"
 handlebars = "4.4.0"
 serde_json = "1.0.107"
 headless_chrome = {git = "https://github.com/atroche/rust-headless-chrome", features = ["fetch"]}
+dirs = "5.0.1"
