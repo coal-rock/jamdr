@@ -8,10 +8,11 @@ use comrak::{markdown_to_html, ComrakOptions};
 use handlebars::Handlebars;
 use headless_chrome::Browser;
 use printpdf::*;
-use pulldown_cmark::CowStr;
 use pulldown_cmark::HeadingLevel;
 use pulldown_cmark::{Event, Tag};
 use serde_json::json;
+
+use crate::extract;
 
 pub trait Backend {
     fn render_files(
@@ -80,8 +81,11 @@ impl Backend for Chromium {
 }
 
 pub struct Inhouse<'a> {
-    markdown: &'a Vec<Event<'a>>,
+    markdown: Vec<Event<'a>>,
     position: usize,
+    page_position: (f32, f32),
+    // list depth: if entry is none, list is bulleted, if entry is some, list is numbered
+    list_depth: Vec<Option<u64>>,
     document: PdfDocumentReference,
     page: PdfPageIndex,
     layer: PdfLayerReference,
@@ -90,15 +94,19 @@ pub struct Inhouse<'a> {
     font: Font,
 }
 
+pub struct Style {
+    regular: f32,
+}
+
 impl<'a> Inhouse<'a> {
-    fn new(markdown: String, title: String) -> Inhouse<'a> {
+    fn new(markdown: &'a str, title: String) -> Inhouse<'a> {
         let width = 209.9;
         let height = 297.0;
-        let mut list_level = 0;
+        // let mut list_level = 0;
 
         let (doc, page1, layer1) = PdfDocument::new(title, Mm(width), Mm(height), "Layer 1");
 
-        let mut font = Font::new(
+        let font = Font::new(
             "assets/fonts/Roboto-Regular.ttf",
             "assets/fonts/Roboto-Bold.ttf",
             "assets/fonts/Roboto-Italic.ttf",
@@ -112,14 +120,16 @@ impl<'a> Inhouse<'a> {
 
         current_layer.set_font(&font.get(), font.regular_size);
         current_layer.set_text_cursor(Mm(1.0), Mm(height - 7.0));
-        current_layer.set_line_height(font.regular_size);
-        // current_layer.set_word_spacing(font.calc_word_spacing());
-        // current_layer.set_character_spacing(font.regular_size);
+        current_layer.set_line_height(font.regular_size + 2.0);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
 
+        let markdown = markdown.clone();
+
         Inhouse {
-            markdown: &pulldown_cmark::Parser::new(&markdown).collect(),
+            markdown: pulldown_cmark::Parser::new(&markdown).collect(),
             position: 0,
+            page_position: (0.0, height),
+            list_depth: vec![],
             document: doc,
             page: page1,
             layer: current_layer,
@@ -137,11 +147,17 @@ impl<'a> Inhouse<'a> {
         self.layer.end_text_section();
     }
 
+    fn save_doc(self) -> Vec<u8> {
+        self.document.save_to_bytes().unwrap()
+    }
+
     fn render(&mut self) {
-        match self.consume() {
-            Event::Start(tag) => self.handle_start(tag),
-            Event::End(tag) => self.handle_end(tag),
-            Event::Text(text) => self.render_text(*text),
+        // println!("{:#?}", self.peek());
+
+        match self.peek() {
+            Event::Start(_) => self.handle_start(),
+            Event::End(_) => self.handle_end(),
+            Event::Text(_) => self.render_text(),
             Event::Code(_) => todo!(),
             Event::Html(_) => todo!(),
             Event::FootnoteReference(_) => todo!(),
@@ -152,49 +168,103 @@ impl<'a> Inhouse<'a> {
         }
     }
 
-    fn handle_start(&mut self, tag: &Tag) {
+    fn handle_start(&mut self) {
+        let tag = extract!(self.consume().clone(), Event::Start);
+
         match tag {
-            Tag::Paragraph => todo!(),
-            Tag::Heading(_, _, _) => todo!(),
+            Tag::Paragraph => {
+                self.font.current_size = self.font.regular_size;
+            }
+            Tag::Heading(heading_level, _, _) => {
+                self.font.start_header(heading_level);
+                self.layer.add_line(Line {
+                    points: vec![
+                        (
+                            Point {
+                                x: Pt(0.0),
+                                y: Pt(10.0),
+                            },
+                            true,
+                        ),
+                        (
+                            Point {
+                                x: Pt(100.0),
+                                y: Pt(10.0),
+                            },
+                            true,
+                        ),
+                    ],
+                    is_closed: true,
+                });
+            }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
-            Tag::List(_) => todo!(),
-            Tag::Item => todo!(),
+            Tag::List(list) => {
+                self.list_depth.push(list);
+            }
+            Tag::Item => {
+                let number = self.list_depth.pop().unwrap();
+
+                let number_str = match number {
+                    Some(number) => number.to_string(),
+                    None => "*".to_string(),
+                };
+
+                self.layer
+                    .write_text(format!("    {} ", number_str), &self.font.get());
+
+                self.list_depth.push(number.map(|x| x + 1))
+            }
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(_) => todo!(),
             Tag::TableHead => todo!(),
             Tag::TableRow => todo!(),
             Tag::TableCell => todo!(),
-            Tag::Emphasis => todo!(),
-            Tag::Strong => todo!(),
-            Tag::Strikethrough => todo!(),
+            Tag::Emphasis => self.font.is_italic = true,
+            Tag::Strong => self.font.is_bold = true,
+            Tag::Strikethrough => self.font.is_strikethrough = true,
             Tag::Link(_, _, _) => todo!(),
             Tag::Image(_, _, _) => todo!(),
         }
     }
 
-    fn handle_end(&mut self, tag: &Tag) {
+    fn handle_end(&mut self) {
+        let tag = extract!(self.consume().clone(), Event::End);
+
         match tag {
-            Tag::Paragraph => todo!(),
-            Tag::Heading(_, _, _) => todo!(),
+            Tag::Paragraph => self.layer.add_line_break(),
+            Tag::Heading(_, _, _) => {
+                self.layer.add_line_break();
+                self.layer.add_line_break();
+                self.font.reset_formatting();
+            }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
-            Tag::List(_) => todo!(),
-            Tag::Item => todo!(),
+            Tag::List(_) => {
+                self.list_depth.pop();
+                self.layer.add_line_break();
+            }
+            Tag::Item => self.layer.add_line_break(),
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(_) => todo!(),
             Tag::TableHead => todo!(),
             Tag::TableRow => todo!(),
             Tag::TableCell => todo!(),
-            Tag::Emphasis => todo!(),
-            Tag::Strong => todo!(),
-            Tag::Strikethrough => todo!(),
+            Tag::Emphasis => self.font.is_italic = false,
+            Tag::Strong => self.font.is_bold = false,
+            Tag::Strikethrough => self.font.is_strikethrough = false,
             Tag::Link(_, _, _) => todo!(),
             Tag::Image(_, _, _) => todo!(),
         }
     }
 
-    fn render_text(&mut self, text: CowStr) {}
+    fn render_text(&mut self) {
+        let text = extract!(self.peek(), Event::Text);
+        self.layer
+            .set_font(&self.font.get(), self.font.current_size);
+        self.layer.write_text(text.to_string(), &self.font.get());
+        self.consume();
+    }
 
     fn load(&mut self) {}
 
@@ -202,6 +272,10 @@ impl<'a> Inhouse<'a> {
         let event = self.markdown.get(self.position).unwrap();
         self.position += 1;
         event
+    }
+
+    fn peek(&self) -> &Event {
+        self.markdown.get(self.position).unwrap()
     }
 
     fn is_at_end(&self) -> bool {
@@ -218,71 +292,16 @@ impl Backend for Inhouse<'_> {
         let mut rendered_files: HashMap<PathBuf, Vec<u8>> = HashMap::new();
 
         for (path, content) in files {
-            let parser: Vec<Event> = pulldown_cmark::Parser::new(content).collect();
+            let mut renderer = Inhouse::new(
+                content,
+                path.file_name().unwrap().to_str().unwrap().to_string(),
+            );
 
-            for event in parser {
-                match event {
-                    Event::Start(start_event) => match start_event {
-                        Tag::Paragraph => font.current_size = font.regular_size,
-                        Tag::Heading(depth, _, _) => font.start_header(depth),
-                        Tag::BlockQuote => todo!(),
-                        Tag::CodeBlock(_) => todo!(),
-                        Tag::List(_) => list_level += 1,
-                        Tag::Item => todo!(),
-                        Tag::FootnoteDefinition(_) => todo!(),
-                        Tag::Table(_) => todo!(),
-                        Tag::TableHead => todo!(),
-                        Tag::TableRow => todo!(),
-                        Tag::TableCell => todo!(),
-                        Tag::Emphasis => font.is_italic = true,
-                        Tag::Strong => font.is_bold = true,
-                        Tag::Strikethrough => todo!(),
-                        Tag::Link(_, _, _) => todo!(),
-                        Tag::Image(_, _, _) => todo!(),
-                    },
-                    Event::End(end_event) => match end_event {
-                        Tag::Paragraph => {
-                            current_layer.add_line_break();
-                            current_layer.add_line_break();
-                        }
-                        Tag::Heading(depth, _, _) => current_layer.add_line_break(),
-                        Tag::BlockQuote => todo!(),
-                        Tag::CodeBlock(_) => todo!(),
-                        Tag::List(_) => list_level -= 1,
-                        Tag::Item => todo!(),
-                        Tag::FootnoteDefinition(_) => todo!(),
-                        Tag::Table(_) => todo!(),
-                        Tag::TableHead => todo!(),
-                        Tag::TableRow => todo!(),
-                        Tag::TableCell => todo!(),
-                        Tag::Emphasis => font.is_italic = false,
-                        Tag::Strong => font.is_bold = false,
-                        Tag::Strikethrough => todo!(),
-                        Tag::Link(_, _, _) => todo!(),
-                        Tag::Image(_, _, _) => todo!(),
-                    },
-                    Event::Text(text) => {
-                        current_layer.set_font(&font.get(), font.current_size);
-                        current_layer.write_text(
-                            format!("{}{}", " -> ".repeat(list_level), text.to_string()),
-                            &font.get(),
-                        );
-                    }
-                    Event::Code(_) => todo!(),
-                    Event::Html(_) => todo!(),
-                    Event::FootnoteReference(_) => todo!(),
-                    Event::SoftBreak => current_layer.add_line_break(),
-                    Event::HardBreak => current_layer.add_line_break(),
-                    Event::Rule => todo!(),
-                    Event::TaskListMarker(_) => todo!(),
-                }
-            }
-
-            current_layer.end_text_section();
+            renderer.render_doc();
 
             rendered_files.insert(
                 path.to_path_buf().with_extension("pdf"),
-                doc.save_to_bytes().unwrap(),
+                renderer.save_doc(),
             );
         }
 
@@ -297,6 +316,7 @@ pub struct Font {
     bold_italic: IndirectFontRef,
     is_bold: bool,
     is_italic: bool,
+    is_strikethrough: bool,
     current_size: f32,
     header_size: f32,
     regular_size: f32,
@@ -330,6 +350,7 @@ impl Font {
 
             is_bold: false,
             is_italic: false,
+            is_strikethrough: false,
             current_size: 8.0,
             regular_size: 8.0,
             header_size: 14.0,
@@ -338,7 +359,7 @@ impl Font {
     }
 
     pub fn get(&self) -> IndirectFontRef {
-        println!("{} {}", self.is_bold, self.is_italic);
+        // println!("{} {}", self.is_bold, self.is_italic);
         match (self.is_bold, self.is_italic) {
             (true, true) => self.bold_italic.clone(),
             (true, false) => self.bold.clone(),
@@ -361,22 +382,36 @@ impl Font {
                 });
     }
 
-    pub fn calc_character_spacing(&self) -> f32 {
-        0.0
-    }
-
-    pub fn calc_word_spacing(&self) -> f32 {
-        0.0
-    }
-
-    pub fn calc_line_height(&self) -> f32 {
-        0.0
+    fn reset_formatting(&mut self) {
+        self.is_bold = false;
+        self.is_italic = false;
+        self.is_strikethrough = false;
     }
 }
 
-pub enum FontMode {
-    Regular,
-    Bold,
-    Italic,
-    BoldItalic,
+/// i am so very sorry
+/// THIS CAN PANIC (it shouldn't tho, just use it properly PLEASE)
+/// usage:
+///
+/// ```
+/// enum Animal {
+///     Cat(String),
+///     Dog(String)
+/// }
+///
+/// let animal = Animal::Cat("meow");
+/// let sound = extract!(animal, Animal::Cat);
+/// assert!(sound, "meow");
+/// ```
+///
+#[macro_export]
+macro_rules! extract {
+    ($target: expr, $pat: path) => {{
+        if let $pat(a) = $target {
+            // #1
+            a
+        } else {
+            panic!("mismatch variant when cast to {}", stringify!($pat)); // #2
+        }
+    }};
 }
