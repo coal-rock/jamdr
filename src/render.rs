@@ -83,26 +83,28 @@ impl Backend for Chromium {
 pub struct Inhouse<'a> {
     markdown: Vec<Event<'a>>,
     position: usize,
-    page_position: (f32, f32),
+    page_position: (Mm, Mm),
     // list depth: if entry is none, list is bulleted, if entry is some, list is numbered
     list_depth: Vec<Option<u64>>,
     document: PdfDocumentReference,
     page: PdfPageIndex,
     layer: PdfLayerReference,
-    width: f32,
-    height: f32,
     font: Font,
+    style: Style,
 }
 
 pub struct Style {
-    regular: f32,
+    width: f32,
+    height: f32,
+    vertical_padding: f32,
+    horizontal_padding: f32,
+    line_height: f32,
 }
 
 impl<'a> Inhouse<'a> {
     fn new(markdown: &'a str, title: String) -> Inhouse<'a> {
         let width = 209.9;
         let height = 297.0;
-        // let mut list_level = 0;
 
         let (doc, page1, layer1) = PdfDocument::new(title, Mm(width), Mm(height), "Layer 1");
 
@@ -114,13 +116,24 @@ impl<'a> Inhouse<'a> {
             &doc,
         );
 
+        let style = Style {
+            width,
+            height,
+            vertical_padding: 10.0,
+            horizontal_padding: 2.0,
+            line_height: font.regular_size + 2.0,
+        };
+
         let current_layer = doc.get_page(page1).get_layer(layer1);
 
         current_layer.begin_text_section();
 
         current_layer.set_font(&font.get(), font.regular_size);
-        current_layer.set_text_cursor(Mm(1.0), Mm(height - 7.0));
-        current_layer.set_line_height(font.regular_size + 2.0);
+        current_layer.set_text_cursor(
+            Mm(style.horizontal_padding),
+            Mm(height - style.vertical_padding + (style.line_height * 0.45)),
+        );
+        current_layer.set_line_height(style.line_height);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
 
         let markdown = markdown.clone();
@@ -128,14 +141,13 @@ impl<'a> Inhouse<'a> {
         Inhouse {
             markdown: pulldown_cmark::Parser::new(&markdown).collect(),
             position: 0,
-            page_position: (0.0, height),
+            page_position: (Mm(0.0), Mm(height - 7.0)),
             list_depth: vec![],
             document: doc,
             page: page1,
             layer: current_layer,
-            width,
-            height,
             font,
+            style,
         }
     }
 
@@ -161,8 +173,8 @@ impl<'a> Inhouse<'a> {
             Event::Code(_) => todo!(),
             Event::Html(_) => todo!(),
             Event::FootnoteReference(_) => todo!(),
-            Event::SoftBreak => self.layer.add_line_break(),
-            Event::HardBreak => self.layer.add_line_break(),
+            Event::SoftBreak => self.line_break(),
+            Event::HardBreak => self.line_break(),
             Event::Rule => todo!(),
             Event::TaskListMarker(_) => todo!(),
         }
@@ -181,15 +193,15 @@ impl<'a> Inhouse<'a> {
                     points: vec![
                         (
                             Point {
-                                x: Pt(0.0),
-                                y: Pt(10.0),
+                                x: Mm(self.style.horizontal_padding).into_pt(),
+                                y: self.page_position.1.into_pt(),
                             },
                             true,
                         ),
                         (
                             Point {
-                                x: Pt(100.0),
-                                y: Pt(10.0),
+                                x: Mm(100.0).into_pt(),
+                                y: self.page_position.1.into_pt(),
                             },
                             true,
                         ),
@@ -232,19 +244,19 @@ impl<'a> Inhouse<'a> {
         let tag = extract!(self.consume().clone(), Event::End);
 
         match tag {
-            Tag::Paragraph => self.layer.add_line_break(),
+            Tag::Paragraph => self.line_break(),
             Tag::Heading(_, _, _) => {
-                self.layer.add_line_break();
-                self.layer.add_line_break();
+                self.line_break();
+                self.line_break();
                 self.font.reset_formatting();
             }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
             Tag::List(_) => {
                 self.list_depth.pop();
-                self.layer.add_line_break();
+                self.line_break();
             }
-            Tag::Item => self.layer.add_line_break(),
+            Tag::Item => self.line_break(),
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(_) => todo!(),
             Tag::TableHead => todo!(),
@@ -264,6 +276,11 @@ impl<'a> Inhouse<'a> {
             .set_font(&self.font.get(), self.font.current_size);
         self.layer.write_text(text.to_string(), &self.font.get());
         self.consume();
+    }
+
+    fn line_break(&mut self) {
+        self.layer.add_line_break();
+        self.page_position.1 -= Pt(self.style.line_height).into();
     }
 
     fn load(&mut self) {}
