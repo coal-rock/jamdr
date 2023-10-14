@@ -2,9 +2,14 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::path::PathBuf;
 
 use comrak::{markdown_to_html, ComrakOptions};
+use freetype;
+use freetype::face::LoadFlag;
+use freetype::Face;
+use freetype::Library;
 use handlebars::Handlebars;
 use headless_chrome::Browser;
 use printpdf::*;
@@ -125,7 +130,6 @@ impl<'a> Inhouse<'a> {
         };
 
         let current_layer = doc.get_page(page1).get_layer(layer1);
-
         current_layer.begin_text_section();
 
         current_layer.set_font(&font.get(), font.regular_size);
@@ -141,7 +145,10 @@ impl<'a> Inhouse<'a> {
         Inhouse {
             markdown: pulldown_cmark::Parser::new(&markdown).collect(),
             position: 0,
-            page_position: (Mm(0.0), Mm(height - 7.0)),
+            page_position: (
+                Mm(style.horizontal_padding),
+                Mm(height - style.vertical_padding),
+            ),
             list_depth: vec![],
             document: doc,
             page: page1,
@@ -189,25 +196,34 @@ impl<'a> Inhouse<'a> {
             }
             Tag::Heading(heading_level, _, _) => {
                 self.font.start_header(heading_level);
-                self.layer.add_line(Line {
+                self.render();
+
+                println!("{}", self.style.horizontal_padding);
+                println!("{:#?}", self.page_position.0);
+                let line = Line {
                     points: vec![
                         (
                             Point {
                                 x: Mm(self.style.horizontal_padding).into_pt(),
-                                y: self.page_position.1.into_pt(),
+                                y: (self.page_position.1 + Pt(self.style.line_height).into())
+                                    .into_pt(),
                             },
                             true,
                         ),
                         (
                             Point {
-                                x: Mm(100.0).into_pt(),
-                                y: self.page_position.1.into_pt(),
+                                x: self.page_position.0.into_pt(),
+                                y: (self.page_position.1 + Pt(self.style.line_height).into())
+                                    .into_pt(),
                             },
                             true,
                         ),
                     ],
                     is_closed: true,
-                });
+                };
+
+                println!("{:#?}", line);
+                self.layer.add_line(line);
             }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
@@ -272,15 +288,41 @@ impl<'a> Inhouse<'a> {
 
     fn render_text(&mut self) {
         let text = extract!(self.peek(), Event::Text);
+        let font = self.font.get_freetype();
+
+        // vertical scale for the space character
+        let vert_scale = {
+            if let Ok(ch) = font.load_char(0x0020, LoadFlag::NO_SCALE) {
+                font.glyph().metrics().vertAdvance
+            } else {
+                1000
+            }
+        };
+
+        // calculate the width of the text in unscaled units
+        let sum_width = text.chars().fold(0, |acc, ch| {
+            if let Ok(ch) = font.load_char(ch as usize, freetype::face::LoadFlag::NO_SCALE) {
+                let glyph_w = font.glyph().metrics().horiAdvance;
+                acc + glyph_w
+            } else {
+                acc
+            }
+        });
+
         self.layer
             .set_font(&self.font.get(), self.font.current_size);
         self.layer.write_text(text.to_string(), &self.font.get());
+
+        self.page_position.0 +=
+            Pt(sum_width as f32 / (vert_scale as f32 / self.font.current_size)).into();
+
         self.consume();
     }
 
     fn line_break(&mut self) {
         self.layer.add_line_break();
         self.page_position.1 -= Pt(self.style.line_height).into();
+        self.page_position.0 = Mm(self.style.horizontal_padding);
     }
 
     fn load(&mut self) {}
@@ -331,6 +373,10 @@ pub struct Font {
     bold: IndirectFontRef,
     italic: IndirectFontRef,
     bold_italic: IndirectFontRef,
+    ft_regular: Face,
+    ft_bold: Face,
+    ft_italic: Face,
+    ft_bold_italic: Face,
     is_bold: bool,
     is_italic: bool,
     is_strikethrough: bool,
@@ -348,23 +394,22 @@ impl Font {
         bold_italic_path: &str,
         doc: &PdfDocumentReference,
     ) -> Self {
+        let library = freetype::Library::init().unwrap();
+
+        let regular = Font::load_font(&doc, &library, 0, regular_path);
+        let bold = Font::load_font(&doc, &library, 0, bold_path);
+        let italic = Font::load_font(&doc, &library, 0, italic_path);
+        let bold_italic = Font::load_font(&doc, &library, 0, bold_italic_path);
+
         Font {
-            regular: doc
-                .add_external_font(File::open(regular_path).unwrap())
-                .unwrap(),
-
-            bold: doc
-                .add_external_font(File::open(bold_path).unwrap())
-                .unwrap(),
-
-            italic: doc
-                .add_external_font(File::open(italic_path).unwrap())
-                .unwrap(),
-
-            bold_italic: doc
-                .add_external_font(File::open(bold_italic_path).unwrap())
-                .unwrap(),
-
+            regular: regular.0,
+            bold: bold.0,
+            italic: italic.0,
+            bold_italic: bold_italic.0,
+            ft_regular: regular.1,
+            ft_bold: bold.1,
+            ft_italic: italic.1,
+            ft_bold_italic: bold_italic.1,
             is_bold: false,
             is_italic: false,
             is_strikethrough: false,
@@ -375,13 +420,33 @@ impl Font {
         }
     }
 
+    fn load_font(
+        doc: &PdfDocumentReference,
+        library: &Library,
+        count: isize,
+        path: &str,
+    ) -> (IndirectFontRef, Face) {
+        (
+            doc.add_external_font(File::open(path).unwrap()).unwrap(),
+            library.new_face(path, count).unwrap(),
+        )
+    }
+
     pub fn get(&self) -> IndirectFontRef {
-        // println!("{} {}", self.is_bold, self.is_italic);
         match (self.is_bold, self.is_italic) {
             (true, true) => self.bold_italic.clone(),
             (true, false) => self.bold.clone(),
             (false, true) => self.italic.clone(),
             (false, false) => self.regular.clone(),
+        }
+    }
+
+    pub fn get_freetype(&self) -> &Face {
+        match (self.is_bold, self.is_italic) {
+            (true, true) => &self.ft_bold_italic,
+            (true, false) => &self.ft_bold,
+            (false, true) => &self.ft_italic,
+            (false, false) => &self.ft_regular,
         }
     }
 

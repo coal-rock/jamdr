@@ -595,6 +595,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "freetype-rs"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7bc9d17f30696eb6bee98ae2f2749bd1d0b24a8ccda8c68db48c8400af496ba"
+dependencies = [
+ "bitflags 2.4.0",
+ "freetype-sys",
+ "libc",
+]
+
+[[package]]
+name = "freetype-sys"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98d8acf5669d9c048e9c096a3049264b381baf76988aaaf7f2f5f1fe848e482b"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -782,6 +804,7 @@ dependencies = [
  "comrak",
  "dirs",
  "figment",
+ "freetype-rs",
  "glob",
  "handlebars",
  "headless_chrome",
