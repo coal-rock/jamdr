@@ -11,9 +11,10 @@ use freetype::face::LoadFlag;
 use freetype::Face;
 use freetype::Library;
 use handlebars::Handlebars;
-use headless_chrome::Browser;
+// use headless_chrome::Browser;
 use printpdf::*;
 use pulldown_cmark::HeadingLevel;
+use pulldown_cmark::Options;
 use pulldown_cmark::{Event, Tag};
 use serde_json::json;
 
@@ -53,8 +54,8 @@ impl Backend for Chromium {
         }
 
         let mut rendered_files: HashMap<PathBuf, Vec<u8>> = HashMap::new();
-        let browser = Browser::default().unwrap();
-        let tab = browser.new_tab().unwrap();
+        // let browser = Browser::default().unwrap();
+        // let tab = browser.new_tab().unwrap();
 
         for (path, content) in templated_files {
             let output = format!(
@@ -68,15 +69,15 @@ impl Backend for Chromium {
 
             fs::write(&output, content).unwrap();
 
-            let pdf = tab
-                .navigate_to(&output)
-                .unwrap()
-                .wait_until_navigated()
-                .unwrap()
-                .print_to_pdf(None)
-                .unwrap();
+            // let pdf = tab
+            //     .navigate_to(&output)
+            //     .unwrap()
+            //     .wait_until_navigated()
+            //     .unwrap()
+            //     .print_to_pdf(None)
+            //     .unwrap();
 
-            rendered_files.insert(path.with_extension("pdf"), pdf);
+            // rendered_files.insert(path.with_extension("pdf"), pdf);
 
             fs::remove_file("tmp.html").unwrap();
         }
@@ -140,10 +141,9 @@ impl<'a> Inhouse<'a> {
         current_layer.set_line_height(style.line_height);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
 
-        let markdown = markdown.clone();
-
         Inhouse {
-            markdown: pulldown_cmark::Parser::new(&markdown).collect(),
+            markdown: pulldown_cmark::Parser::new_ext(&markdown, Options::ENABLE_STRIKETHROUGH)
+                .collect(),
             position: 0,
             page_position: (
                 Mm(style.horizontal_padding),
@@ -238,10 +238,12 @@ impl<'a> Inhouse<'a> {
                     None => "*".to_string(),
                 };
 
-                self.layer
-                    .write_text(format!("    {} ", number_str), &self.font.get());
+                let text = format!("    {} ", number_str);
 
-                self.list_depth.push(number.map(|x| x + 1))
+                self.layer.write_text(&text, &self.font.get());
+                self.list_depth.push(number.map(|x| x + 1));
+
+                self.page_position.0 += self.calc_text_width(text.to_string());
             }
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(_) => todo!(),
@@ -288,20 +290,59 @@ impl<'a> Inhouse<'a> {
 
     fn render_text(&mut self) {
         let text = extract!(self.peek(), Event::Text);
+
+        self.layer
+            .set_font(&self.font.get(), self.font.current_size);
+        self.layer.write_text(text.to_string(), &self.font.get());
+
+        let x_before = self.page_position.0;
+
+        self.page_position.0 += self.calc_text_width(text.to_string());
+
+        if self.font.is_strikethrough {
+            let y = (self.page_position.1 + Pt(self.style.line_height * 1.55).into()).into_pt();
+
+            let line = Line {
+                points: vec![
+                    (
+                        Point {
+                            x: x_before.into_pt(),
+                            y,
+                        },
+                        true,
+                    ),
+                    (
+                        Point {
+                            x: self.page_position.0.into_pt(),
+                            y,
+                        },
+                        true,
+                    ),
+                ],
+                is_closed: true,
+            };
+
+            self.layer.add_line(line);
+        }
+
+        self.consume();
+    }
+
+    fn calc_vert_scale(&self) -> i64 {
         let font = self.font.get_freetype();
 
-        // vertical scale for the space character
-        let vert_scale = {
-            if let Ok(ch) = font.load_char(0x0020, LoadFlag::NO_SCALE) {
-                font.glyph().metrics().vertAdvance
-            } else {
-                1000
-            }
-        };
+        if let Ok(_) = font.load_char(0x0020, LoadFlag::NO_SCALE) {
+            font.glyph().metrics().vertAdvance
+        } else {
+            1000
+        }
+    }
 
-        // calculate the width of the text in unscaled units
+    fn calc_text_width(&self, text: String) -> Mm {
+        let font = self.font.get_freetype();
+
         let sum_width = text.chars().fold(0, |acc, ch| {
-            if let Ok(ch) = font.load_char(ch as usize, freetype::face::LoadFlag::NO_SCALE) {
+            if let Ok(_) = font.load_char(ch as usize, freetype::face::LoadFlag::NO_SCALE) {
                 let glyph_w = font.glyph().metrics().horiAdvance;
                 acc + glyph_w
             } else {
@@ -309,14 +350,7 @@ impl<'a> Inhouse<'a> {
             }
         });
 
-        self.layer
-            .set_font(&self.font.get(), self.font.current_size);
-        self.layer.write_text(text.to_string(), &self.font.get());
-
-        self.page_position.0 +=
-            Pt(sum_width as f32 / (vert_scale as f32 / self.font.current_size)).into();
-
-        self.consume();
+        Pt(sum_width as f32 / (self.calc_vert_scale() as f32 / self.font.current_size)).into()
     }
 
     fn line_break(&mut self) {

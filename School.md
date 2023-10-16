@@ -1,12 +1,12 @@
 # The Enlightenment and Social Contract Theory
 
-## Thomas Hobbes (1588 - 1679)
+## ~~Thomas~~ Hobbes (1588 - 1679)
 
-- “The life of man was solitary, poor, nasty, brutish, and short.”
+- ~~“The~~ life of man was solitary, poor, nasty, brutish, and short.”
 - Wrote *Leviathan* in 1658
 - Believed that **human nature was rooted in corruption**
 - Believed **humans to be driven by self-interest, greed, and desire for power**
-- Supported absolute monarchy
+- Supported ~absolute~ monarchy
 - Wanted government to hold absolute and undemocratic power
 - Believed social contract served to **prevent a return to uncivilized nature**
 
