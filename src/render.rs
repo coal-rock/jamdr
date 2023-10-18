@@ -89,7 +89,11 @@ impl Backend for Chromium {
 pub struct Inhouse<'a> {
     markdown: Vec<Event<'a>>,
     position: usize,
-    page_position: (Mm, Mm),
+    // it makes more sense to store page dimensions in millimeters,
+    // we however store the position in points, as it makes line height and certain
+    // formatting calculations easier
+    page_position: (Pt, Pt),
+    temp_position: (Pt, Pt),
     // list depth: if entry is none, list is bulleted, if entry is some, list is numbered
     list_depth: Vec<Option<u64>>,
     document: PdfDocumentReference,
@@ -100,19 +104,25 @@ pub struct Inhouse<'a> {
 }
 
 pub struct Style {
-    width: f32,
-    height: f32,
-    vertical_padding: f32,
-    horizontal_padding: f32,
-    line_height: f32,
+    width: Mm,
+    height: Mm,
+    vertical_padding: Mm,
+    horizontal_padding: Mm,
+    underline_headings: UnderlineOptions,
+}
+
+pub enum UnderlineOptions {
+    FullPage,
+    Text,
+    None,
 }
 
 impl<'a> Inhouse<'a> {
     fn new(markdown: &'a str, title: String) -> Inhouse<'a> {
-        let width = 209.9;
-        let height = 297.0;
+        let width = Mm(209.9);
+        let height = Mm(297.0);
 
-        let (doc, page1, layer1) = PdfDocument::new(title, Mm(width), Mm(height), "Layer 1");
+        let (doc, page1, layer1) = PdfDocument::new(title, width, height, "Layer 1");
 
         let font = Font::new(
             "assets/fonts/Roboto-Regular.ttf",
@@ -125,20 +135,17 @@ impl<'a> Inhouse<'a> {
         let style = Style {
             width,
             height,
-            vertical_padding: 10.0,
-            horizontal_padding: 2.0,
-            line_height: font.regular_size + 2.0,
+            vertical_padding: Mm(10.0),
+            horizontal_padding: Mm(2.0),
+            underline_headings: UnderlineOptions::FullPage,
         };
 
         let current_layer = doc.get_page(page1).get_layer(layer1);
         current_layer.begin_text_section();
 
         current_layer.set_font(&font.get(), font.regular_size);
-        current_layer.set_text_cursor(
-            Mm(style.horizontal_padding),
-            Mm(height - style.vertical_padding + (style.line_height * 0.45)),
-        );
-        current_layer.set_line_height(style.line_height);
+        current_layer.set_text_cursor(style.horizontal_padding, height - style.vertical_padding);
+        current_layer.set_line_height(font.line_height);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
 
         Inhouse {
@@ -146,9 +153,10 @@ impl<'a> Inhouse<'a> {
                 .collect(),
             position: 0,
             page_position: (
-                Mm(style.horizontal_padding),
-                Mm(height - style.vertical_padding),
+                style.horizontal_padding.into_pt(),
+                (height - style.vertical_padding).into_pt(),
             ),
+            temp_position: (Pt(0.0), Pt(0.0)),
             list_depth: vec![],
             document: doc,
             page: page1,
@@ -171,7 +179,7 @@ impl<'a> Inhouse<'a> {
     }
 
     fn render(&mut self) {
-        // println!("{:#?}", self.peek());
+        self.reset_formatting();
 
         match self.peek() {
             Event::Start(_) => self.handle_start(),
@@ -195,26 +203,47 @@ impl<'a> Inhouse<'a> {
                 self.font.current_size = self.font.regular_size;
             }
             Tag::Heading(heading_level, _, _) => {
-                self.font.start_header(heading_level);
+                self.font.is_bold = true;
+                self.font.current_size = self.font.header_size
+                    - (self.font.header_size_scale_increment
+                        * match heading_level {
+                            HeadingLevel::H1 => 1.0,
+                            HeadingLevel::H2 => 2.0,
+                            HeadingLevel::H3 => 3.0,
+                            HeadingLevel::H4 => 4.0,
+                            HeadingLevel::H5 => 5.0,
+                            HeadingLevel::H6 => 6.0,
+                        });
+
                 self.render();
 
-                println!("{}", self.style.horizontal_padding);
-                println!("{:#?}", self.page_position.0);
+                let x_coords = match self.style.underline_headings {
+                    UnderlineOptions::FullPage => (
+                        self.style.horizontal_padding.into_pt(),
+                        (self.style.width - self.style.horizontal_padding).into_pt(),
+                    ),
+                    UnderlineOptions::Text => (
+                        self.style.horizontal_padding.into_pt(),
+                        self.page_position.0,
+                    ),
+                    UnderlineOptions::None => return,
+                };
+
+                let y_height = self.page_position.1;
+
                 let line = Line {
                     points: vec![
                         (
                             Point {
-                                x: Mm(self.style.horizontal_padding).into_pt(),
-                                y: (self.page_position.1 + Pt(self.style.line_height).into())
-                                    .into_pt(),
+                                x: x_coords.0,
+                                y: y_height,
                             },
                             true,
                         ),
                         (
                             Point {
-                                x: self.page_position.0.into_pt(),
-                                y: (self.page_position.1 + Pt(self.style.line_height).into())
-                                    .into_pt(),
+                                x: x_coords.1,
+                                y: y_height,
                             },
                             true,
                         ),
@@ -243,7 +272,7 @@ impl<'a> Inhouse<'a> {
                 self.layer.write_text(&text, &self.font.get());
                 self.list_depth.push(number.map(|x| x + 1));
 
-                self.page_position.0 += self.calc_text_width(text.to_string());
+                self.page_position.0 += self.calc_text_width(text.to_string()).into_pt();
             }
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(_) => todo!(),
@@ -253,7 +282,9 @@ impl<'a> Inhouse<'a> {
             Tag::Emphasis => self.font.is_italic = true,
             Tag::Strong => self.font.is_bold = true,
             Tag::Strikethrough => self.font.is_strikethrough = true,
-            Tag::Link(_, _, _) => todo!(),
+            Tag::Link(_, _, _) => {
+                self.temp_position = self.page_position;
+            }
             Tag::Image(_, _, _) => todo!(),
         }
     }
@@ -266,7 +297,6 @@ impl<'a> Inhouse<'a> {
             Tag::Heading(_, _, _) => {
                 self.line_break();
                 self.line_break();
-                self.font.reset_formatting();
             }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
@@ -283,7 +313,15 @@ impl<'a> Inhouse<'a> {
             Tag::Emphasis => self.font.is_italic = false,
             Tag::Strong => self.font.is_bold = false,
             Tag::Strikethrough => self.font.is_strikethrough = false,
-            Tag::Link(_, _, _) => todo!(),
+            Tag::Link(link_type, dest, _) => {
+                self.layer.add_link_annotation(LinkAnnotation::new(
+                    printpdf::Rect::new(Mm(10.0), Mm(200.0), Mm(100.0), Mm(212.0)),
+                    Some(printpdf::BorderArray::default()),
+                    Some(printpdf::ColorArray::default()),
+                    printpdf::Actions::uri("aslkdj".to_string()),
+                    Some(printpdf::HighlightingMode::Invert),
+                ));
+            }
             Tag::Image(_, _, _) => todo!(),
         }
     }
@@ -297,24 +335,25 @@ impl<'a> Inhouse<'a> {
 
         let x_before = self.page_position.0;
 
-        self.page_position.0 += self.calc_text_width(text.to_string());
+        self.page_position.0 += self.calc_text_width(text.to_string()).into();
 
         if self.font.is_strikethrough {
-            let y = (self.page_position.1 + Pt(self.style.line_height * 1.55).into()).into_pt();
+            // let y = (self.page_position.1 + Pt(self.style.line_height * 1.55).into()).into_pt();
+            let y = self.page_position.1;
 
             let line = Line {
                 points: vec![
                     (
                         Point {
-                            x: x_before.into_pt(),
-                            y,
+                            x: x_before,
+                            y: y.into(),
                         },
                         true,
                     ),
                     (
                         Point {
-                            x: self.page_position.0.into_pt(),
-                            y,
+                            x: self.page_position.0,
+                            y: y.into(),
                         },
                         true,
                     ),
@@ -355,11 +394,17 @@ impl<'a> Inhouse<'a> {
 
     fn line_break(&mut self) {
         self.layer.add_line_break();
-        self.page_position.1 -= Pt(self.style.line_height).into();
-        self.page_position.0 = Mm(self.style.horizontal_padding);
+        self.page_position.1 -= Pt(self.font.line_height);
+        self.page_position.0 = self.style.horizontal_padding.into_pt();
     }
 
-    fn load(&mut self) {}
+    // resets formatting, AND applies changes made to underlying objects
+    fn reset_formatting(&mut self) {
+        self.font.clear_typography();
+        self.layer.set_line_height(self.font.line_height);
+        self.layer
+            .set_font(&self.font.get(), self.font.current_size);
+    }
 
     fn consume(&mut self) -> &Event {
         let event = self.markdown.get(self.position).unwrap();
@@ -402,6 +447,8 @@ impl Backend for Inhouse<'_> {
     }
 }
 
+// not-so thin wrapper around IndirectFontRef
+// manages typopgraphic state
 pub struct Font {
     regular: IndirectFontRef,
     bold: IndirectFontRef,
@@ -418,6 +465,7 @@ pub struct Font {
     header_size: f32,
     regular_size: f32,
     header_size_scale_increment: f32,
+    line_height: f32,
 }
 
 impl Font {
@@ -447,10 +495,11 @@ impl Font {
             is_bold: false,
             is_italic: false,
             is_strikethrough: false,
-            current_size: 8.0,
-            regular_size: 8.0,
-            header_size: 14.0,
+            current_size: 12.0,
+            regular_size: 12.0,
+            header_size: 18.0,
             header_size_scale_increment: 2.0,
+            line_height: 20.0,
         }
     }
 
@@ -484,24 +533,13 @@ impl Font {
         }
     }
 
-    pub fn start_header(&mut self, depth: HeadingLevel) {
-        self.is_bold = true;
-        self.current_size = self.header_size
-            - (self.header_size_scale_increment
-                * match depth {
-                    HeadingLevel::H1 => 1.0,
-                    HeadingLevel::H2 => 2.0,
-                    HeadingLevel::H3 => 3.0,
-                    HeadingLevel::H4 => 4.0,
-                    HeadingLevel::H5 => 5.0,
-                    HeadingLevel::H6 => 6.0,
-                });
-    }
-
-    fn reset_formatting(&mut self) {
+    // reset internal formatting
+    // does **NOT** apply to layer immediately
+    fn clear_typography(&mut self) {
         self.is_bold = false;
         self.is_italic = false;
         self.is_strikethrough = false;
+        self.current_size = self.regular_size;
     }
 }
 

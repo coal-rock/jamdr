@@ -1,8 +1,8 @@
 # The Enlightenment and Social Contract Theory
 
-## ~~Thomas~~ Hobbes (1588 - 1679)
+## Thomas Hobbes (1588 - 1679)
 
-- ~~“The~~ life of man was solitary, poor, nasty, brutish, and short.”
+- “The life of man was solitary, poor, nasty, brutish, and short.”
 - Wrote *Leviathan* in 1658
 - Believed that **human nature was rooted in corruption**
 - Believed **humans to be driven by self-interest, greed, and desire for power**
@@ -11,12 +11,11 @@
 - Believed social contract served to **prevent a return to uncivilized nature**
 
 ## John Locke (1632 – 1704)
-
-- Influenced by the *Glorious Revolution*
+- [Influenced](https://google.com) by the *Glorious Revolution*
 - Wrote *Second Treatise of Government* in 1690,
 - Beliefs heavily diverged from Hobbes
 - Believed that **nature was good by default**
-- Beiieved humans were born with **natural rights**
+- ~~*Be*li**e*v*e**d~~ humans were born with **natural rights**
 - Believed humans entered social contract to **provide order** and to **protect rights**
 
 ## Jean-Jacques Rousseau (1712 - 1788) 
