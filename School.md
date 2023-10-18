@@ -1,6 +1,6 @@
 # The Enlightenment and Social Contract Theory
 
-## Thomas Hobbes (1588 - 1679)
+## ~~Thomas~~ Hobbes (*1588* - 1679)
 
 - “The life of man was solitary, poor, nasty, brutish, and short.”
 - Wrote *Leviathan* in 1658
@@ -17,7 +17,7 @@
 - Believed that **nature was good by default**
 - ~~*Be*li**e*v*e**d~~ humans were born with **natural rights**
 - Believed humans entered social contract to **provide order** and to **protect rights**
-
+---
 ## Jean-Jacques Rousseau (1712 - 1788) 
 
 - French Enlightenment Thinker

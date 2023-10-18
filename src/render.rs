@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io;
 use std::path::PathBuf;
 
 use comrak::{markdown_to_html, ComrakOptions};
@@ -108,12 +107,12 @@ pub struct Style {
     height: Mm,
     vertical_padding: Mm,
     horizontal_padding: Mm,
-    underline_headings: UnderlineOptions,
+    underline_headings: HeaderUnderline,
 }
 
-pub enum UnderlineOptions {
+pub enum HeaderUnderline {
     FullPage,
-    Text,
+    TextOnly,
     None,
 }
 
@@ -135,9 +134,9 @@ impl<'a> Inhouse<'a> {
         let style = Style {
             width,
             height,
-            vertical_padding: Mm(10.0),
-            horizontal_padding: Mm(2.0),
-            underline_headings: UnderlineOptions::FullPage,
+            vertical_padding: Mm(14.0),
+            horizontal_padding: Mm(14.0),
+            underline_headings: HeaderUnderline::FullPage,
         };
 
         let current_layer = doc.get_page(page1).get_layer(layer1);
@@ -179,8 +178,6 @@ impl<'a> Inhouse<'a> {
     }
 
     fn render(&mut self) {
-        // self.reset_formatting();
-
         match self.peek() {
             Event::Start(_) => self.handle_start(),
             Event::End(_) => self.handle_end(),
@@ -188,9 +185,18 @@ impl<'a> Inhouse<'a> {
             Event::Code(_) => todo!(),
             Event::Html(_) => todo!(),
             Event::FootnoteReference(_) => todo!(),
-            Event::SoftBreak => self.line_break(),
-            Event::HardBreak => self.line_break(),
-            Event::Rule => todo!(),
+            Event::SoftBreak => {
+                self.line_break();
+                self.consume();
+            }
+            Event::HardBreak => {
+                self.line_break();
+                self.consume();
+            }
+            Event::Rule => {
+                self.horizontal_rule();
+                self.consume();
+            }
             Event::TaskListMarker(_) => todo!(),
         }
     }
@@ -218,17 +224,17 @@ impl<'a> Inhouse<'a> {
                 self.render();
 
                 match self.style.underline_headings {
-                    UnderlineOptions::FullPage => self.draw_line(
+                    HeaderUnderline::FullPage => self.draw_line(
                         self.style.horizontal_padding.into_pt(),
                         (self.style.width - self.style.horizontal_padding).into_pt(),
                         LineLocation::Underline,
                     ),
-                    UnderlineOptions::Text => self.draw_line(
+                    HeaderUnderline::TextOnly => self.draw_line(
                         self.style.horizontal_padding.into_pt(),
                         self.page_position.0,
                         LineLocation::Underline,
                     ),
-                    UnderlineOptions::None => {}
+                    HeaderUnderline::None => {}
                 };
             }
             Tag::BlockQuote => todo!(),
@@ -381,6 +387,15 @@ impl<'a> Inhouse<'a> {
         self.reset_formatting();
     }
 
+    fn horizontal_rule(&mut self) {
+        self.draw_line(
+            self.style.horizontal_padding.into_pt(),
+            (self.style.width - self.style.horizontal_padding).into_pt(),
+            LineLocation::Strikethrough,
+        );
+        self.line_break();
+    }
+
     // resets formatting, AND applies changes made to underlying objects
     fn reset_formatting(&mut self) {
         self.font.clear_typography();
@@ -485,8 +500,8 @@ impl Font {
             is_strikethrough: false,
             current_size: 12.0,
             regular_size: 12.0,
-            header_size: 18.0,
-            header_size_scale_increment: 2.0,
+            header_size: 20.0,
+            header_size_scale_increment: 4.0,
             line_height: 20.0,
         }
     }
