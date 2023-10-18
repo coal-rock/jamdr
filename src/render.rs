@@ -179,7 +179,7 @@ impl<'a> Inhouse<'a> {
     }
 
     fn render(&mut self) {
-        self.reset_formatting();
+        // self.reset_formatting();
 
         match self.peek() {
             Event::Start(_) => self.handle_start(),
@@ -217,42 +217,19 @@ impl<'a> Inhouse<'a> {
 
                 self.render();
 
-                let x_coords = match self.style.underline_headings {
-                    UnderlineOptions::FullPage => (
+                match self.style.underline_headings {
+                    UnderlineOptions::FullPage => self.draw_line(
                         self.style.horizontal_padding.into_pt(),
                         (self.style.width - self.style.horizontal_padding).into_pt(),
+                        LineLocation::Underline,
                     ),
-                    UnderlineOptions::Text => (
+                    UnderlineOptions::Text => self.draw_line(
                         self.style.horizontal_padding.into_pt(),
                         self.page_position.0,
+                        LineLocation::Underline,
                     ),
-                    UnderlineOptions::None => return,
+                    UnderlineOptions::None => {}
                 };
-
-                let y_height = self.page_position.1;
-
-                let line = Line {
-                    points: vec![
-                        (
-                            Point {
-                                x: x_coords.0,
-                                y: y_height,
-                            },
-                            true,
-                        ),
-                        (
-                            Point {
-                                x: x_coords.1,
-                                y: y_height,
-                            },
-                            true,
-                        ),
-                    ],
-                    is_closed: true,
-                };
-
-                println!("{:#?}", line);
-                self.layer.add_line(line);
             }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
@@ -296,7 +273,6 @@ impl<'a> Inhouse<'a> {
             Tag::Paragraph => self.line_break(),
             Tag::Heading(_, _, _) => {
                 self.line_break();
-                self.line_break();
             }
             Tag::BlockQuote => todo!(),
             Tag::CodeBlock(_) => todo!(),
@@ -338,30 +314,7 @@ impl<'a> Inhouse<'a> {
         self.page_position.0 += self.calc_text_width(text.to_string()).into();
 
         if self.font.is_strikethrough {
-            // let y = (self.page_position.1 + Pt(self.style.line_height * 1.55).into()).into_pt();
-            let y = self.page_position.1;
-
-            let line = Line {
-                points: vec![
-                    (
-                        Point {
-                            x: x_before,
-                            y: y.into(),
-                        },
-                        true,
-                    ),
-                    (
-                        Point {
-                            x: self.page_position.0,
-                            y: y.into(),
-                        },
-                        true,
-                    ),
-                ],
-                is_closed: true,
-            };
-
-            self.layer.add_line(line);
+            self.draw_line(x_before, self.page_position.0, LineLocation::Strikethrough);
         }
 
         self.consume();
@@ -392,10 +345,40 @@ impl<'a> Inhouse<'a> {
         Pt(sum_width as f32 / (self.calc_vert_scale() as f32 / self.font.current_size)).into()
     }
 
+    fn draw_line(&self, start: Pt, end: Pt, location: LineLocation) {
+        let offset = match location {
+            LineLocation::Underline => Pt(-self.font.line_height * 0.25),
+            LineLocation::Strikethrough => Pt(self.font.line_height * 0.20),
+        };
+
+        let line = Line {
+            points: vec![
+                (
+                    Point {
+                        x: start,
+                        y: self.page_position.1 + offset,
+                    },
+                    true,
+                ),
+                (
+                    Point {
+                        x: end,
+                        y: self.page_position.1 + offset,
+                    },
+                    true,
+                ),
+            ],
+            is_closed: true,
+        };
+
+        self.layer.add_line(line);
+    }
+
     fn line_break(&mut self) {
         self.layer.add_line_break();
         self.page_position.1 -= Pt(self.font.line_height);
         self.page_position.0 = self.style.horizontal_padding.into_pt();
+        self.reset_formatting();
     }
 
     // resets formatting, AND applies changes made to underlying objects
@@ -419,6 +402,11 @@ impl<'a> Inhouse<'a> {
     fn is_at_end(&self) -> bool {
         self.position >= self.markdown.len()
     }
+}
+
+enum LineLocation {
+    Underline,
+    Strikethrough,
 }
 
 impl Backend for Inhouse<'_> {
