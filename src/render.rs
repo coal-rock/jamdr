@@ -108,6 +108,8 @@ pub struct Style {
     vertical_padding: Mm,
     horizontal_padding: Mm,
     underline_headings: HeaderUnderline,
+    text_color: Color,
+    rule_color: Color,
 }
 
 pub enum HeaderUnderline {
@@ -137,6 +139,8 @@ impl<'a> Inhouse<'a> {
             vertical_padding: Mm(14.0),
             horizontal_padding: Mm(14.0),
             underline_headings: HeaderUnderline::FullPage,
+            text_color: Color::Rgb(Rgb::new(51.0 / 256.0, 51.0 / 256.0, 51.0 / 256.0, None)),
+            rule_color: Color::Rgb(Rgb::new(221.0 / 256.0, 221.0 / 256.0, 221.0 / 256.0, None)),
         };
 
         let current_layer = doc.get_page(page1).get_layer(layer1);
@@ -146,6 +150,7 @@ impl<'a> Inhouse<'a> {
         current_layer.set_text_cursor(style.horizontal_padding, height - style.vertical_padding);
         current_layer.set_line_height(font.line_height);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
+        current_layer.set_fill_color(style.text_color.clone());
 
         Inhouse {
             markdown: pulldown_cmark::Parser::new_ext(&markdown, Options::ENABLE_STRIKETHROUGH)
@@ -222,6 +227,8 @@ impl<'a> Inhouse<'a> {
                         });
 
                 self.render();
+
+                self.layer.set_outline_color(self.style.rule_color.clone());
 
                 match self.style.underline_headings {
                     HeaderUnderline::FullPage => self.draw_line(
@@ -320,6 +327,7 @@ impl<'a> Inhouse<'a> {
         self.page_position.0 += self.calc_text_width(text.to_string()).into();
 
         if self.font.is_strikethrough {
+            self.layer.set_outline_color(self.style.text_color.clone());
             self.draw_line(x_before, self.page_position.0, LineLocation::Strikethrough);
         }
 
@@ -388,6 +396,8 @@ impl<'a> Inhouse<'a> {
     }
 
     fn horizontal_rule(&mut self) {
+        self.layer.set_outline_color(self.style.rule_color.clone());
+
         self.draw_line(
             self.style.horizontal_padding.into_pt(),
             (self.style.width - self.style.horizontal_padding).into_pt(),
