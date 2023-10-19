@@ -248,10 +248,10 @@ impl<'a> Inhouse<'a> {
 
                 let number_str = match number {
                     Some(number) => number.to_string(),
-                    None => "*".to_string(),
+                    None => "•".to_string(),
                 };
 
-                let text = format!("    {} ", number_str);
+                let text = format!("  {}  ", number_str);
 
                 self.layer.write_text(&text, &self.font.get());
                 self.list_depth.push(number.map(|x| x + 1));
@@ -318,11 +318,23 @@ impl<'a> Inhouse<'a> {
         self.layer
             .set_line_height(self.font.line_height_scale * self.font.current_size);
 
-        self.layer.write_text(text.to_string(), &self.font.get());
-
+        let mut text_width = self.calc_text_width(text.to_string());
+        let usable_page_width = self.style.width - (self.style.horizontal_padding * 2.0);
         let x_before = self.page_position.0;
 
-        self.page_position.0 += self.calc_text_width(text.to_string()).into();
+        if text_width > usable_page_width {
+            let lines = self.wrap_text(text.to_string(), usable_page_width);
+
+            for line in lines {
+                self.layer.write_text(line.0, &self.font.get());
+                self.line_break();
+                text_width = line.1;
+            }
+        } else {
+            self.layer.write_text(text.to_string(), &self.font.get());
+        }
+
+        self.page_position.0 += text_width.into();
 
         if self.font.is_strikethrough {
             self.layer.set_outline_color(self.style.text_color.clone());
@@ -357,10 +369,39 @@ impl<'a> Inhouse<'a> {
         Pt(sum_width as f32 / (self.calc_vert_scale() as f32 / self.font.current_size)).into()
     }
 
+    // FIXME: fucks up with spaced punctuation being last char on line
+    // fix by ensurinng split contains at least 1 non-punctuation char
+    fn wrap_text(&self, text: String, usable_page_width: Mm) -> Vec<(String, Mm)> {
+        let words = text.split(" ");
+        let space_width = self.calc_text_width(" ".to_string());
+        let mut lines = vec![];
+        let mut line = String::new();
+
+        let mut page_width_remaining = usable_page_width;
+
+        for word in words {
+            let width = self.calc_text_width(word.to_string());
+
+            if (page_width_remaining.0 - width.0) >= 0.0 {
+                line.push_str(word);
+                line.push_str(" ");
+                page_width_remaining -= width;
+                page_width_remaining -= space_width
+            } else {
+                lines.push((line.clone(), self.calc_text_width(line)));
+                line = String::new();
+                page_width_remaining = usable_page_width;
+            }
+        }
+
+        lines.push((line.clone(), self.calc_text_width(line)));
+        lines
+    }
+
     fn draw_line(&self, start: Pt, end: Pt, location: LineLocation) {
         let offset = match location {
             LineLocation::Underline => {
-                Pt(-self.font.line_height_scale * self.font.current_size * 0.15)
+                Pt(-self.font.line_height_scale * self.font.current_size * 0.25)
             }
             LineLocation::Strikethrough => {
                 Pt(self.font.line_height_scale * self.font.current_size * 0.2)
