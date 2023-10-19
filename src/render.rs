@@ -114,7 +114,6 @@ pub struct Style {
 
 pub enum HeaderUnderline {
     FullPage,
-    TextOnly,
     None,
 }
 
@@ -148,7 +147,7 @@ impl<'a> Inhouse<'a> {
 
         current_layer.set_font(&font.get(), font.regular_size);
         current_layer.set_text_cursor(style.horizontal_padding, height - style.vertical_padding);
-        current_layer.set_line_height(font.line_height);
+        current_layer.set_line_height(font.current_size * font.line_height_scale);
         current_layer.set_text_rendering_mode(TextRenderingMode::Fill);
         current_layer.set_fill_color(style.text_color.clone());
 
@@ -218,27 +217,22 @@ impl<'a> Inhouse<'a> {
                 self.font.current_size = self.font.header_size
                     - (self.font.header_size_scale_increment
                         * match heading_level {
-                            HeadingLevel::H1 => 1.0,
-                            HeadingLevel::H2 => 2.0,
-                            HeadingLevel::H3 => 3.0,
-                            HeadingLevel::H4 => 4.0,
-                            HeadingLevel::H5 => 5.0,
-                            HeadingLevel::H6 => 6.0,
+                            HeadingLevel::H1 => 0.0,
+                            HeadingLevel::H2 => 1.0,
+                            HeadingLevel::H3 => 2.0,
+                            HeadingLevel::H4 => 3.0,
+                            HeadingLevel::H5 => 4.0,
+                            HeadingLevel::H6 => 5.0,
                         });
 
-                self.render();
-
                 self.layer.set_outline_color(self.style.rule_color.clone());
+
+                self.render();
 
                 match self.style.underline_headings {
                     HeaderUnderline::FullPage => self.draw_line(
                         self.style.horizontal_padding.into_pt(),
                         (self.style.width - self.style.horizontal_padding).into_pt(),
-                        LineLocation::Underline,
-                    ),
-                    HeaderUnderline::TextOnly => self.draw_line(
-                        self.style.horizontal_padding.into_pt(),
-                        self.page_position.0,
                         LineLocation::Underline,
                     ),
                     HeaderUnderline::None => {}
@@ -320,6 +314,10 @@ impl<'a> Inhouse<'a> {
 
         self.layer
             .set_font(&self.font.get(), self.font.current_size);
+
+        self.layer
+            .set_line_height(self.font.line_height_scale * self.font.current_size);
+
         self.layer.write_text(text.to_string(), &self.font.get());
 
         let x_before = self.page_position.0;
@@ -361,8 +359,12 @@ impl<'a> Inhouse<'a> {
 
     fn draw_line(&self, start: Pt, end: Pt, location: LineLocation) {
         let offset = match location {
-            LineLocation::Underline => Pt(-self.font.line_height * 0.25),
-            LineLocation::Strikethrough => Pt(self.font.line_height * 0.20),
+            LineLocation::Underline => {
+                Pt(-self.font.line_height_scale * self.font.current_size * 0.15)
+            }
+            LineLocation::Strikethrough => {
+                Pt(self.font.line_height_scale * self.font.current_size * 0.2)
+            }
         };
 
         let line = Line {
@@ -390,7 +392,7 @@ impl<'a> Inhouse<'a> {
 
     fn line_break(&mut self) {
         self.layer.add_line_break();
-        self.page_position.1 -= Pt(self.font.line_height);
+        self.page_position.1 -= Pt(self.font.line_height_scale * self.font.current_size);
         self.page_position.0 = self.style.horizontal_padding.into_pt();
         self.reset_formatting();
     }
@@ -409,7 +411,8 @@ impl<'a> Inhouse<'a> {
     // resets formatting, AND applies changes made to underlying objects
     fn reset_formatting(&mut self) {
         self.font.clear_typography();
-        self.layer.set_line_height(self.font.line_height);
+        self.layer
+            .set_line_height(self.font.line_height_scale * self.font.current_size);
         self.layer
             .set_font(&self.font.get(), self.font.current_size);
     }
@@ -478,7 +481,7 @@ pub struct Font {
     header_size: f32,
     regular_size: f32,
     header_size_scale_increment: f32,
-    line_height: f32,
+    line_height_scale: f32,
 }
 
 impl Font {
@@ -508,11 +511,11 @@ impl Font {
             is_bold: false,
             is_italic: false,
             is_strikethrough: false,
-            current_size: 12.0,
-            regular_size: 12.0,
-            header_size: 20.0,
+            current_size: 8.0,
+            regular_size: 10.0,
+            header_size: 18.0,
             header_size_scale_increment: 4.0,
-            line_height: 20.0,
+            line_height_scale: 1.6,
         }
     }
 
