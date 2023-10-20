@@ -225,9 +225,9 @@ impl<'a> Inhouse<'a> {
                             HeadingLevel::H6 => 5.0,
                         });
 
-                self.layer.set_outline_color(self.style.rule_color.clone());
-
                 self.render();
+
+                self.layer.set_outline_color(self.style.rule_color.clone());
 
                 match self.style.underline_headings {
                     HeaderUnderline::FullPage => self.draw_line(
@@ -319,27 +319,49 @@ impl<'a> Inhouse<'a> {
             .set_line_height(self.font.line_height_scale * self.font.current_size);
 
         let mut text_width = self.calc_text_width(text.to_string());
-        let usable_page_width = self.style.width - (self.style.horizontal_padding * 2.0);
+        let usable_page_width =
+            self.style.width - self.style.horizontal_padding - self.page_position.0.into();
+
         let x_before = self.page_position.0;
 
-        if text_width > usable_page_width {
+        if text_width + self.page_position.0.into() > usable_page_width {
             let lines = self.wrap_text(text.to_string(), usable_page_width);
 
-            for line in lines {
-                self.layer.write_text(line.0, &self.font.get());
-                self.line_break();
+            for (pos, line) in lines.clone().into_iter().enumerate() {
+                self.layer.write_text(&line.0, &self.font.get());
+
+                if self.font.is_strikethrough {
+                    self.layer.set_outline_color(self.style.text_color.clone());
+
+                    println!("{:#?} - {}", line.0, self.font.is_strikethrough);
+
+                    self.draw_line(
+                        self.page_position.0,
+                        self.page_position.0 + line.1.into(),
+                        LineLocation::Strikethrough,
+                    )
+                }
+
+                if pos != lines.len() - 1 {
+                    self.line_break_preseve_formatting();
+                }
+
                 text_width = line.1;
             }
         } else {
             self.layer.write_text(text.to_string(), &self.font.get());
+
+            if self.font.is_strikethrough {
+                self.layer.set_outline_color(self.style.text_color.clone());
+                self.draw_line(
+                    x_before,
+                    self.page_position.0 + text_width.into(),
+                    LineLocation::Strikethrough,
+                );
+            }
         }
 
         self.page_position.0 += text_width.into();
-
-        if self.font.is_strikethrough {
-            self.layer.set_outline_color(self.style.text_color.clone());
-            self.draw_line(x_before, self.page_position.0, LineLocation::Strikethrough);
-        }
 
         self.consume();
     }
@@ -386,11 +408,11 @@ impl<'a> Inhouse<'a> {
                 line.push_str(word);
                 line.push_str(" ");
                 page_width_remaining -= width;
-                page_width_remaining -= space_width
+                page_width_remaining -= space_width;
             } else {
                 lines.push((line.clone(), self.calc_text_width(line)));
                 line = String::new();
-                page_width_remaining = usable_page_width;
+                page_width_remaining = self.style.width - self.style.horizontal_padding * 2.0;
             }
         }
 
@@ -436,6 +458,12 @@ impl<'a> Inhouse<'a> {
         self.page_position.1 -= Pt(self.font.line_height_scale * self.font.current_size);
         self.page_position.0 = self.style.horizontal_padding.into_pt();
         self.reset_formatting();
+    }
+
+    fn line_break_preseve_formatting(&mut self) {
+        self.layer.add_line_break();
+        self.page_position.1 -= Pt(self.font.line_height_scale * self.font.current_size);
+        self.page_position.0 = self.style.horizontal_padding.into_pt();
     }
 
     fn horizontal_rule(&mut self) {
