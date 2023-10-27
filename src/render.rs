@@ -12,6 +12,7 @@ use freetype::Library;
 use handlebars::Handlebars;
 // use headless_chrome::Browser;
 use printpdf::*;
+use pulldown_cmark::Alignment;
 use pulldown_cmark::HeadingLevel;
 use pulldown_cmark::Options;
 use pulldown_cmark::{Event, Tag};
@@ -95,6 +96,7 @@ pub struct Inhouse<'a> {
     temp_position: (Pt, Pt),
     // list depth: if entry is none, list is bulleted, if entry is some, list is numbered
     list_depth: Vec<Option<u64>>,
+    current_table: Table,
     document: PdfDocumentReference,
     page: PdfPageIndex,
     layer: PdfLayerReference,
@@ -152,8 +154,11 @@ impl<'a> Inhouse<'a> {
         current_layer.set_fill_color(style.text_color.clone());
 
         Inhouse {
-            markdown: pulldown_cmark::Parser::new_ext(&markdown, Options::ENABLE_STRIKETHROUGH)
-                .collect(),
+            markdown: pulldown_cmark::Parser::new_ext(
+                &markdown,
+                Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+            )
+            .collect(),
             position: 0,
             page_position: (
                 style.horizontal_padding.into_pt(),
@@ -182,6 +187,8 @@ impl<'a> Inhouse<'a> {
     }
 
     fn render(&mut self) {
+        println!("{:#?}", self.peek());
+
         match self.peek() {
             Event::Start(_) => self.handle_start(),
             Event::End(_) => self.handle_end(),
@@ -259,10 +266,10 @@ impl<'a> Inhouse<'a> {
                 self.page_position.0 += self.calc_text_width(text.to_string()).into_pt();
             }
             Tag::FootnoteDefinition(_) => todo!(),
-            Tag::Table(_) => todo!(),
-            Tag::TableHead => todo!(),
-            Tag::TableRow => todo!(),
-            Tag::TableCell => todo!(),
+            Tag::Table(tags) => self.render_table(tags),
+            Tag::TableHead => {}
+            Tag::TableRow => {}
+            Tag::TableCell => {}
             Tag::Emphasis => self.font.is_italic = true,
             Tag::Strong => self.font.is_bold = true,
             Tag::Strikethrough => self.font.is_strikethrough = true,
@@ -292,7 +299,7 @@ impl<'a> Inhouse<'a> {
             Tag::Table(_) => todo!(),
             Tag::TableHead => todo!(),
             Tag::TableRow => todo!(),
-            Tag::TableCell => todo!(),
+            Tag::TableCell => {}
             Tag::Emphasis => self.font.is_italic = false,
             Tag::Strong => self.font.is_bold = false,
             Tag::Strikethrough => self.font.is_strikethrough = false,
@@ -333,8 +340,6 @@ impl<'a> Inhouse<'a> {
                 if self.font.is_strikethrough {
                     self.layer.set_outline_color(self.style.text_color.clone());
 
-                    println!("{:#?} - {}", line.0, self.font.is_strikethrough);
-
                     self.draw_line(
                         self.page_position.0,
                         self.page_position.0 + line.1.into(),
@@ -364,6 +369,13 @@ impl<'a> Inhouse<'a> {
         self.page_position.0 += text_width.into();
 
         self.consume();
+    }
+
+    fn render_table(&mut self, tags: Vec<Alignment>) {
+        // println!("{:#?}", self.consume());
+        // println!("{:#?}", self.consume());
+        // println!("{:#?}", self.consume());
+        // println!("{:#?}", self.consume());
     }
 
     fn calc_vert_scale(&self) -> i64 {
@@ -398,7 +410,6 @@ impl<'a> Inhouse<'a> {
         let space_width = self.calc_text_width(" ".to_string());
         let mut lines = vec![];
         let mut line = String::new();
-
         let mut page_width_remaining = usable_page_width;
 
         for word in words {
@@ -529,6 +540,39 @@ impl Backend for Inhouse<'_> {
         }
 
         rendered_files
+    }
+}
+
+pub struct Table {
+    columns: Vec<Vec<Option<String>>>,
+    column_index: usize,
+    row_index: usize,
+}
+
+impl Table {
+    pub fn new() -> Table {
+        Table {
+            columns: vec![vec![]],
+            column_index: 0,
+            row_index: 0,
+        }
+    }
+
+    pub fn get_current_cell(&self) -> &Option<String> {
+        &self.columns[self.column_index][self.row_index]
+    }
+
+    pub fn set_current_cell(&mut self, text: String) {
+        self.columns[self.column_index][self.row_index] = Some(text);
+    }
+
+    pub fn next_cell(&mut self) {
+        self.column_index += 1;
+    }
+
+    pub fn next_row(&mut self) {
+        self.column_index = 0;
+        self.row_index += 1;
     }
 }
 
