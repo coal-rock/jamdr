@@ -96,7 +96,8 @@ pub struct Inhouse<'a> {
     temp_position: (Pt, Pt),
     // list depth: if entry is none, list is bulleted, if entry is some, list is numbered
     list_depth: Vec<Option<u64>>,
-    current_table: Table,
+    current_table: Table<'a>,
+    current_table_cell: Vec<&'a Tag<'a>>,
     document: PdfDocumentReference,
     page: PdfPageIndex,
     layer: PdfLayerReference,
@@ -166,6 +167,8 @@ impl<'a> Inhouse<'a> {
             ),
             temp_position: (Pt(0.0), Pt(0.0)),
             list_depth: vec![],
+            current_table: Table::new(),
+            current_table_cell: Vec::new(),
             document: doc,
             page: page1,
             layer: current_layer,
@@ -267,8 +270,8 @@ impl<'a> Inhouse<'a> {
             }
             Tag::FootnoteDefinition(_) => todo!(),
             Tag::Table(tags) => self.render_table(tags),
-            Tag::TableHead => {}
-            Tag::TableRow => {}
+            Tag::TableHead => self.current_table.position = TablePosition::Head,
+            Tag::TableRow => self.current_table.position = TablePosition::Row,
             Tag::TableCell => {}
             Tag::Emphasis => self.font.is_italic = true,
             Tag::Strong => self.font.is_bold = true,
@@ -296,8 +299,8 @@ impl<'a> Inhouse<'a> {
             }
             Tag::Item => self.line_break(),
             Tag::FootnoteDefinition(_) => todo!(),
-            Tag::Table(_) => todo!(),
-            Tag::TableHead => todo!(),
+            Tag::Table(_) => {}
+            Tag::TableHead => self.current_table.,
             Tag::TableRow => todo!(),
             Tag::TableCell => {}
             Tag::Emphasis => self.font.is_italic = false,
@@ -543,27 +546,30 @@ impl Backend for Inhouse<'_> {
     }
 }
 
-pub struct Table {
-    columns: Vec<Vec<Option<String>>>,
+pub struct Table<'a> {
+    columns: Vec<Vec<Option<Vec<&'a Tag<'a>>>>>,
     column_index: usize,
     row_index: usize,
+    position: TablePosition,
 }
 
-impl Table {
-    pub fn new() -> Table {
+impl Table<'_> {
+    pub fn new() -> Table<'static> {
         Table {
             columns: vec![vec![]],
             column_index: 0,
             row_index: 0,
+            position: TablePosition::None,
         }
     }
 
-    pub fn get_current_cell(&self) -> &Option<String> {
+    pub fn get_current_cell(&self) -> &Option<Vec<&Tag>> {
         &self.columns[self.column_index][self.row_index]
     }
 
-    pub fn set_current_cell(&mut self, text: String) {
-        self.columns[self.column_index][self.row_index] = Some(text);
+    // TODO: janky use of static lifetimes
+    pub fn set_current_cell(&mut self, contents: Option<Vec<&'static Tag<'static>>>) {
+        self.columns[self.column_index][self.row_index] = contents;
     }
 
     pub fn next_cell(&mut self) {
@@ -574,6 +580,12 @@ impl Table {
         self.column_index = 0;
         self.row_index += 1;
     }
+}
+
+pub enum TablePosition {
+    None,
+    Head,
+    Row,
 }
 
 // not-so thin wrapper around IndirectFontRef

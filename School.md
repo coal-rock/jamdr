@@ -27,7 +27,7 @@
 - Believed **wealth created vanity and corruption**
 - Pre-Marx socialism-esk
 
-| Item         | Price     | # In stock |
+| *Item*         | Price     | # In stock |
 |--------------|-----------|------------|
 | Juicy Apples | 1.99      | *7*        |
 | Bananas      | **1.89**  | 5234       |
